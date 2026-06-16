@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Globe 2050 — Scénario Climatique</title>
+
+  <!-- Three.js r128 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #030a18;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      color: #ddeeff;
+    }
+
+    #wrap {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      cursor: grab;
+    }
+    canvas:active { cursor: grabbing; }
+
+    /* ── Loading ── */
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: #030a18;
+      z-index: 30;
+    }
+    #loading p { color: rgba(100,180,255,0.7); font-size: 14px; }
+    .spin {
+      width: 38px; height: 38px;
+      border: 2px solid rgba(60,120,255,0.15);
+      border-top-color: #3a8fff;
+      border-radius: 50%;
+      animation: sp .75s linear infinite;
+    }
+    @keyframes sp { to { transform: rotate(360deg); } }
+
+    /* ── Badge année ── */
+    #badge {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(3,10,24,0.92);
+      border: 0.5px solid rgba(255,100,60,0.4);
+      border-radius: 20px;
+      padding: 6px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #ff8060;
+      letter-spacing: .05em;
+      backdrop-filter: blur(10px);
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    /* ── Panneau info pays ── */
+    #panel {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 250px;
+      background: rgba(3,10,24,0.93);
+      border: 0.5px solid rgba(60,140,255,0.22);
+      border-radius: 14px;
+      padding: 16px 18px;
+      backdrop-filter: blur(14px);
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+    }
+    #panel h2 {
+      font-size: 16px;
+      font-weight: 500;
+      color: #6ab0ff;
+      margin-bottom: 2px;
+    }
+    #p-sub {
+      font-size: 10px;
+      color: rgba(100,160,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      margin-bottom: 10px;
+    }
+    .sec {
+      font-size: 10px;
+      color: rgba(100,160,255,0.35);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin: 10px 0 5px;
+      border-top: 0.5px solid rgba(60,140,255,0.1);
+      padding-top: 8px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: rgba(170,200,255,0.7);
+      margin: 4px 0;
+    }
+    .row b { color: #ddeeff; font-weight: 500; }
+    .bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: rgba(130,180,255,0.55);
+      margin-bottom: 2px;
+    }
+    .bar-bg {
+      height: 4px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 2px;
+      margin-bottom: 6px;
+    }
+    .bar-fill { height: 100%; border-radius: 2px; }
+    .note {
+      margin-top: 10px;
+      font-size: 11px;
+      color: rgba(120,170,255,0.45);
+      line-height: 1.6;
+    }
+
+    /* Badges de risque */
+    .warn {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      margin-top: 8px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .warn.critical { background: rgba(255,50,50,0.15); color: #ff7070; border: 0.5px solid rgba(255,50,50,0.3); }
+    .warn.high     { background: rgba(255,150,0,0.15);  color: #ffaa40; border: 0.5px solid rgba(255,150,0,0.3); }
+    .warn.moderate { background: rgba(0,200,120,0.12);  color: #40e090; border: 0.5px solid rgba(0,200,120,0.25); }
+    .warn.safe     { background: rgba(60,140,255,0.12); color: #60aaff; border: 0.5px solid rgba(60,140,255,0.25); }
+
+    /* ── Légende ── */
+    #legend {
+      position: absolute;
+      bottom: 40px;
+      left: 16px;
+      background: rgba(3,10,24,0.9);
+      border: 0.5px solid rgba(60,140,255,0.18);
+      border-radius: 12px;
+      padding: 12px 16px;
+      backdrop-filter: blur(12px);
+    }
+    #legend h4 {
+      font-size: 10px;
+      color: rgba(100,160,255,0.45);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      margin-bottom: 8px;
+    }
+    .leg-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: rgba(160,200,255,0.65);
+      margin: 5px 0;
+    }
+    .leg-dot {
+      width: 12px; height: 12px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* ── Zoom ── */
+    #zoom-controls {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .zb {
+      width: 30px; height: 30px;
+      background: rgba(3,10,24,0.9);
+      border: 0.5px solid rgba(60,140,255,0.2);
+      border-radius: 8px;
+      color: #6ab0ff;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s;
+    }
+    .zb:hover { background: rgba(60,140,255,0.12); }
+
+    /* ── Tooltip survol ── */
+    #tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(3,10,24,0.92);
+      border: 0.5px solid rgba(60,140,255,0.28);
+      border-radius: 7px;
+      padding: 5px 12px;
+      font-size: 12px;
+      color: #88ccff;
+      display: none;
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    /* ── Hint bas ── */
+    #hint {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: rgba(60,120,200,0.35);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    /* Scrollbar panneau */
+    #panel::-webkit-scrollbar { width: 4px; }
+    #panel::-webkit-scrollbar-track { background: transparent; }
+    #panel::-webkit-scrollbar-thumb { background: rgba(60,140,255,0.2); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<div id="wrap">
+  <!-- Loading -->
+  <div id="loading">
+    <div class="spin"></div>
+    <p id="load-msg">Chargement des frontières mondiales…</p>
+  </div>
+
+  <!-- Canvas Three.js -->
+  <canvas id="globe-canvas"></canvas>
+
+  <!-- Badge 2050 -->
+  <div id="badge">🌊 MONDE 2050 — Scénario +2°C</div>
+
+  <!-- Zoom -->
+  <div id="zoom-controls">
+    <button class="zb" id="btn-zoom-in"  title="Zoomer">+</button>
+    <button class="zb" id="btn-zoom-out" title="Dézoomer">−</button>
+  </div>
+
+  <!-- Panneau info -->
+  <div id="panel">
+    <h2 id="p-name">🌍 Globe 2050</h2>
+    <div id="p-sub">Scénario climatique</div>
+    <div id="p-body" style="font-size:12px;color:rgba(100,160,255,0.4);margin-top:4px;">
+      Cliquez sur un pays pour voir l'impact climatique en 2050.
+    </div>
+  </div>
+
+  <!-- Légende -->
+  <div id="legend">
+    <h4>Risque 2050</h4>
+    <div class="leg-row"><div class="leg-dot" style="background:#b81a07"></div>Critique — submersion</div>
+    <div class="leg-row"><div class="leg-dot" style="background:#c46a07"></div>Élevé</div>
+    <div class="leg-row"><div class="leg-dot" style="background:#1a6b40"></div>Modéré</div>
+    <div class="leg-row"><div class="leg-dot" style="background:#1a5090"></div>Résilient</div>
+    <div class="leg-row"><div class="leg-dot" style="background:#071d3d"></div>Océan</div>
+  </div>
+
+  <!-- Tooltip -->
+  <div id="tooltip"></div>
+
+  <!-- Hint -->
+  <div id="hint">Glisser pour tourner · Scroll pour zoomer · Clic pour explorer</div>
+</div>
+
+<!-- Données et logique -->
+<script src="countries.js"></script>
+<script src="globe.js"></script>
+
+</body>
+</html>
