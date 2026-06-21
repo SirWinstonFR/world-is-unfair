@@ -419,16 +419,20 @@ function buildFillMesh(feature, color, radius) {
 }
 
 function buildBorderLines(feature, radius, colorHex, opacity) {
-  radius = radius || 1.0045;
+  radius = radius || 1.012;
   const geo = feature.geometry;
   const group = new THREE.Group();
   function ringToLine(ring) {
     if (!ring || ring.length < 2) return;
     const pts = ring.map(([lon,lat]) => ll2v(lon, lat, radius));
     const lg = new THREE.BufferGeometry().setFromPoints(pts);
-    group.add(new THREE.Line(lg, new THREE.LineBasicMaterial({
-      color: colorHex, transparent: true, opacity: opacity ?? 0.5
-    })));
+    const mat = new THREE.LineBasicMaterial({
+      color: colorHex, transparent: true, opacity: opacity ?? 0.5,
+      depthTest: false
+    });
+    const line = new THREE.Line(lg, mat);
+    line.renderOrder = 999;
+    group.add(line);
   }
   if (geo.type === "Polygon")      geo.coordinates.forEach(ringToLine);
   if (geo.type === "MultiPolygon") geo.coordinates.forEach(p => p.forEach(ringToLine));
