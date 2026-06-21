@@ -3,42 +3,27 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Globe 2050 — Scénario Climatique</title>
+  <title>Globe 3D — Pays &amp; Régions</title>
 
-  <!--
-    Dépendances chargées depuis cdnjs (accessibles depuis n'importe quel navigateur) :
-    - Three.js r128  : rendu 3D WebGL
-    - D3-geo         : projection géographique + triangulation correcte
-    - TopoJSON       : décodage des frontières compactes
-  -->
+  <!-- Three.js (rendu 3D) + TopoJSON (décodage frontières) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
 
   <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-    :root {
-      --bg:       #030a18;
-      --panel-bg: rgba(3,10,24,0.93);
-      --border:   rgba(60,140,255,0.2);
-      --text:     #ddeeff;
-      --muted:    rgba(120,170,255,0.45);
-      --accent:   #6ab0ff;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      background: var(--bg);
+      background: #05070d;
       font-family: system-ui, -apple-system, sans-serif;
       overflow: hidden;
-      color: var(--text);
+      color: #e4ecf7;
     }
 
-    /* ── Canvas ── */
     #globe-canvas {
       display: block;
-      cursor: grab;
-      position: absolute;
+      position: fixed;
       inset: 0;
+      cursor: grab;
     }
     #globe-canvas:active { cursor: grabbing; }
 
@@ -50,137 +35,63 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 18px;
-      background: var(--bg);
-      z-index: 100;
-      transition: opacity .5s;
+      gap: 16px;
+      background: #05070d;
+      z-index: 50;
+      transition: opacity .4s;
     }
     #loading.hidden { opacity: 0; pointer-events: none; }
     .spinner {
-      width: 40px; height: 40px;
-      border: 2px solid rgba(60,140,255,.12);
-      border-top-color: #4a9fff;
+      width: 36px; height: 36px;
+      border: 2px solid rgba(120,150,200,.15);
+      border-top-color: #7a96c8;
       border-radius: 50%;
       animation: spin .8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    #load-msg { font-size: 13px; color: var(--muted); }
-    #load-bar-wrap {
-      width: 200px; height: 3px;
-      background: rgba(60,140,255,.1);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    #load-bar {
-      height: 100%;
-      background: #4a9fff;
-      border-radius: 2px;
-      width: 0%;
-      transition: width .3s;
-    }
+    #load-msg { font-size: 13px; color: rgba(150,170,210,.7); }
 
-    /* ── Badge année ── */
-    #badge {
-      position: fixed;
-      top: 16px; left: 50%;
-      transform: translateX(-50%);
-      background: var(--panel-bg);
-      border: 0.5px solid rgba(255,100,60,.4);
-      border-radius: 20px;
-      padding: 6px 20px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #ff8060;
-      letter-spacing: .04em;
-      backdrop-filter: blur(12px);
-      white-space: nowrap;
-      pointer-events: none;
-      z-index: 10;
-    }
-
-    /* ── Panneau info ── */
+    /* ── Panneau nom (minimal) ── */
     #panel {
       position: fixed;
-      top: 16px; right: 16px;
-      width: 260px;
-      max-height: calc(100vh - 32px);
-      overflow-y: auto;
-      background: var(--panel-bg);
-      border: 0.5px solid var(--border);
-      border-radius: 14px;
-      padding: 16px 18px;
-      backdrop-filter: blur(14px);
+      top: 18px; right: 18px;
+      background: rgba(10,14,24,0.88);
+      border: 1px solid rgba(120,150,200,0.18);
+      border-radius: 10px;
+      padding: 12px 18px;
+      backdrop-filter: blur(10px);
       z-index: 10;
+      min-width: 160px;
+      text-align: right;
     }
-    #panel::-webkit-scrollbar { width: 3px; }
-    #panel::-webkit-scrollbar-thumb { background: rgba(60,140,255,.2); border-radius: 2px; }
-
-    #p-name { font-size: 16px; font-weight: 500; color: var(--accent); margin-bottom: 2px; }
-    #p-sub  { font-size: 10px; color: rgba(100,160,255,.4); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 10px; }
-
-    .sec {
-      font-size: 10px;
-      color: rgba(100,160,255,.35);
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      margin: 10px 0 5px;
-      padding-top: 8px;
-      border-top: 0.5px solid rgba(60,140,255,.1);
-    }
-    .row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: rgba(170,200,255,.7);
-      margin: 3px 0;
-    }
-    .row b { color: var(--text); font-weight: 500; }
-
-    .bar-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
-    .bar-bg    { height: 4px; background: rgba(255,255,255,.07); border-radius: 2px; margin-bottom: 6px; }
-    .bar-fill  { height: 100%; border-radius: 2px; }
-
-    .risk-badge {
-      font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 8px;
-      margin-top: 6px;
+    #p-name {
+      font-size: 16px;
       font-weight: 500;
-      line-height: 1.5;
+      color: #fff;
     }
-    .risk-3 { background: rgba(200,40,40,.15); color: #ff6060; border: 0.5px solid rgba(200,40,40,.3); }
-    .risk-2 { background: rgba(210,130,0,.15);  color: #ffaa40; border: 0.5px solid rgba(210,130,0,.3); }
-    .risk-1 { background: rgba(0,180,100,.12);  color: #40d890; border: 0.5px solid rgba(0,180,100,.25); }
-    .risk-0 { background: rgba(40,120,220,.12); color: #60aaff; border: 0.5px solid rgba(40,120,220,.25); }
-
-    .flood-zone {
-      margin-top: 8px;
-      padding: 6px 10px;
-      background: rgba(0,100,200,.12);
-      border: 0.5px solid rgba(0,150,255,.25);
-      border-radius: 8px;
+    #p-sub {
       font-size: 11px;
-      color: #60c8ff;
-      line-height: 1.5;
+      color: rgba(150,170,210,.5);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-top: 2px;
     }
 
-    .note { margin-top: 10px; font-size: 11px; color: var(--muted); line-height: 1.6; }
-
-    /* ── Zoom ── */
+    /* ── Zoom controls ── */
     #zoom-ctrl {
       position: fixed;
-      top: 16px; left: 16px;
+      top: 18px; left: 18px;
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 6px;
       z-index: 10;
     }
     .zb {
-      width: 30px; height: 30px;
-      background: var(--panel-bg);
-      border: 0.5px solid var(--border);
+      width: 32px; height: 32px;
+      background: rgba(10,14,24,0.85);
+      border: 1px solid rgba(120,150,200,0.18);
       border-radius: 8px;
-      color: var(--accent);
+      color: #9ab0d8;
       font-size: 18px;
       cursor: pointer;
       display: flex;
@@ -188,57 +99,36 @@
       justify-content: center;
       transition: background .15s;
     }
-    .zb:hover { background: rgba(60,140,255,.12); }
+    .zb:hover { background: rgba(120,150,200,.12); }
 
-    /* ── Mode toggle (pays / régions) ── */
-    #mode-toggle {
+    /* ── Mode indicator ── */
+    #mode-badge {
       position: fixed;
-      bottom: 40px; right: 16px;
-      display: flex;
-      gap: 6px;
-      z-index: 10;
-    }
-    .mode-btn {
-      padding: 6px 12px;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(10,14,24,0.85);
+      border: 1px solid rgba(120,150,200,0.18);
+      border-radius: 16px;
+      padding: 6px 16px;
       font-size: 11px;
-      background: var(--panel-bg);
-      border: 0.5px solid var(--border);
-      border-radius: 8px;
-      color: var(--muted);
-      cursor: pointer;
-      transition: all .15s;
-    }
-    .mode-btn.active {
-      background: rgba(60,140,255,.15);
-      color: var(--accent);
-      border-color: rgba(60,140,255,.4);
-    }
-
-    /* ── Légende ── */
-    #legend {
-      position: fixed;
-      bottom: 40px; left: 16px;
-      background: var(--panel-bg);
-      border: 0.5px solid var(--border);
-      border-radius: 12px;
-      padding: 12px 16px;
-      backdrop-filter: blur(12px);
+      color: rgba(150,170,210,.65);
+      letter-spacing: .04em;
+      backdrop-filter: blur(8px);
       z-index: 10;
+      pointer-events: none;
+      transition: opacity .3s;
     }
-    #legend h4 { font-size: 10px; color: rgba(100,160,255,.4); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 8px; }
-    .leg { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(160,200,255,.65); margin: 5px 0; }
-    .leg-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
 
-    /* ── Tooltip ── */
+    /* ── Tooltip survol ── */
     #tooltip {
       position: fixed;
       pointer-events: none;
-      background: var(--panel-bg);
-      border: 0.5px solid rgba(60,140,255,.28);
-      border-radius: 7px;
-      padding: 5px 12px;
+      background: rgba(10,14,24,0.92);
+      border: 1px solid rgba(120,150,200,0.22);
+      border-radius: 6px;
+      padding: 4px 10px;
       font-size: 12px;
-      color: #88ccff;
+      color: #c0d0f0;
       display: none;
       white-space: nowrap;
       z-index: 20;
@@ -247,65 +137,56 @@
     /* ── Hint ── */
     #hint {
       position: fixed;
-      bottom: 12px; left: 50%;
-      transform: translateX(-50%);
+      bottom: 20px; right: 18px;
       font-size: 11px;
-      color: rgba(60,120,200,.35);
-      pointer-events: none;
+      color: rgba(120,150,200,.35);
       z-index: 10;
+      pointer-events: none;
     }
+
+    /* ── Bouton retour ── */
+    #btn-back {
+      position: fixed;
+      bottom: 56px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20,26,40,0.9);
+      border: 1px solid rgba(120,150,200,0.25);
+      border-radius: 16px;
+      padding: 7px 18px;
+      font-size: 12px;
+      color: #c0d0f0;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      z-index: 10;
+      transition: background .15s;
+    }
+    #btn-back:hover { background: rgba(120,150,200,.18); }
   </style>
 </head>
 <body>
 
-<!-- Loading -->
 <div id="loading">
   <div class="spinner"></div>
-  <p id="load-msg">Initialisation…</p>
-  <div id="load-bar-wrap"><div id="load-bar"></div></div>
+  <p id="load-msg">Chargement du globe…</p>
 </div>
 
-<!-- Globe -->
 <canvas id="globe-canvas"></canvas>
 
-<!-- UI -->
-<div id="badge">🌊 MONDE 2050 — Scénario +2°C</div>
-
 <div id="zoom-ctrl">
-  <button class="zb" id="btn-zi">+</button>
-  <button class="zb" id="btn-zo">−</button>
+  <button class="zb" id="btn-zi" title="Zoomer">+</button>
+  <button class="zb" id="btn-zo" title="Dézoomer">−</button>
 </div>
 
 <div id="panel">
-  <div id="p-name">🌍 Globe 2050</div>
-  <div id="p-sub">Scénario climatique</div>
-  <div id="p-body" style="font-size:12px;color:rgba(100,160,255,.4);margin-top:4px;">
-    Cliquez sur un pays ou une région pour explorer les données 2050.
-  </div>
+  <div id="p-name">🌍 Globe</div>
+  <div id="p-sub">Cliquez sur un pays</div>
 </div>
 
-<div id="legend">
-  <h4>Risque 2050</h4>
-  <div class="leg"><div class="leg-dot" style="background:#c02020"></div>Critique — submersion</div>
-  <div class="leg"><div class="leg-dot" style="background:#c07010"></div>Élevé</div>
-  <div class="leg"><div class="leg-dot" style="background:#1a6b40"></div>Modéré</div>
-  <div class="leg"><div class="leg-dot" style="background:#1a4a90"></div>Résilient</div>
-  <div class="leg"><div class="leg-dot" style="background:#0d3060" style="border:0.5px solid rgba(60,140,255,.3)"></div>Zone inondée 2050</div>
-</div>
-
-<div id="mode-toggle">
-  <button class="mode-btn active" id="btn-countries">Pays</button>
-  <button class="mode-btn" id="btn-regions">Régions</button>
-</div>
-
+<div id="mode-badge">Vue mondiale — pays</div>
+<button id="btn-back" style="display:none;">← Retour au monde</button>
 <div id="tooltip"></div>
-<div id="hint">Glisser · Scroll pour zoomer · Clic pour explorer</div>
+<div id="hint">Glisser · Scroll pour zoomer</div>
 
-<!-- Données -->
-<script src="countries.js"></script>
-<script src="regions.js"></script>
-<!-- Globe -->
 <script src="globe.js"></script>
-
 </body>
 </html>
