@@ -476,7 +476,7 @@ async function loadCountries() {
     mesh.userData = { name, feature: feat, type: "country" };
     globeGroup.add(mesh);
 
-    const borders = buildBorderLines(feat, 1.0045, 0x070a10, 0.65);
+    const borders = buildBorderLines(feat, 1.0045, 0x6a87b8, 0.75);
     globeGroup.add(borders);
 
     countryMeshes.push(mesh);
@@ -533,7 +533,7 @@ async function getRegionsForCountry(countryName) {
     if (!mesh) continue;
     mesh.userData = { name, feature: feat, type: "region", country: countryName };
 
-    const borders = buildBorderLines(feat, 1.0055, 0x070a10, 0.55);
+    const borders = buildBorderLines(feat, 1.0055, 0x7a98c8, 0.65);
 
     meshes.push({ mesh, borders });
   }
