@@ -465,14 +465,23 @@ function buildFillMesh(feature, color, radius) {
   bg.setAttribute("position", new THREE.Float32BufferAttribute(all, 3));
   bg.computeVertexNormals();
   const col = new THREE.Color(color[0], color[1], color[2]);
-  const mat = new THREE.MeshPhongMaterial({ color: col, shininess: 10, side: THREE.DoubleSide });
+  const mat = new THREE.MeshPhongMaterial({
+    color: col, shininess: 10, side: THREE.DoubleSide,
+    // Recule légèrement les faces pleines dans le depth-buffer pour que les
+    // lignes de frontière (rayon 1.005) ressortent nettement au-dessus sans
+    // z-fighting, tout en gardant depthTest actif (pas de transparence à travers).
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1
+  });
   const mesh = new THREE.Mesh(bg, mat);
+  mesh.renderOrder = 1;
   mesh.userData.baseColor = col.clone();
   return mesh;
 }
 
 function buildBorderLines(feature, radius, colorHex, opacity) {
-  radius = radius || 1.012;
+  radius = radius || 1.008;
   const geo = feature.geometry;
   const group = new THREE.Group();
   function ringToLine(ring) {
@@ -481,10 +490,10 @@ function buildBorderLines(feature, radius, colorHex, opacity) {
     const lg = new THREE.BufferGeometry().setFromPoints(pts);
     const mat = new THREE.LineBasicMaterial({
       color: colorHex, transparent: true, opacity: opacity ?? 0.5,
-      depthTest: false
+      depthTest: true
     });
     const line = new THREE.Line(lg, mat);
-    line.renderOrder = 999;
+    line.renderOrder = 2;
     group.add(line);
   }
   if (geo.type === "Polygon")      geo.coordinates.forEach(ringToLine);
@@ -533,7 +542,7 @@ async function loadCountries() {
     mesh.userData = { name, feature: feat, type: "country" };
     globeGroup.add(mesh);
 
-    const borders = buildBorderLines(feat, 1.0045, 0x6a87b8, 0.75);
+    const borders = buildBorderLines(feat, 1.009, 0x90b0e0, 0.9);
     globeGroup.add(borders);
 
     countryMeshes.push(mesh);
@@ -558,7 +567,10 @@ async function loadRegionsIndex() {
   return REGIONS_INDEX;
 }
 
-/** Construit (ou récupère du cache) les meshes de régions pour un pays donné */
+/** Construit (ou récupère du cache) les meshes de régions pour un pays donné.
+ *  La construction est étalée (yield au navigateur tous les quelques régions) pour
+ *  ne pas bloquer la boucle d'animation : le globe continue de tourner pendant le
+ *  chargement au lieu de "geler". */
 async function getRegionsForCountry(countryName) {
   if (regionsCache[countryName]) return regionsCache[countryName];
 
@@ -577,10 +589,12 @@ async function getRegionsForCountry(countryName) {
     return [];
   }
 
+  const feats = geo.features || [];
   const meshes = [];
-  for (const feat of (geo.features || [])) {
+  for (let i = 0; i < feats.length; i++) {
+    const feat = feats[i];
     const name = feat.properties?.name || "Région";
-    const jitter = (Math.random()-0.5)*0.035;
+    const jitter = (Math.random()-0.5)*0.06;
     const color = [
       clamp01(REGION_FILL[0]+jitter),
       clamp01(REGION_FILL[1]+jitter),
@@ -590,9 +604,11 @@ async function getRegionsForCountry(countryName) {
     if (!mesh) continue;
     mesh.userData = { name, feature: feat, type: "region", country: countryName };
 
-    const borders = buildBorderLines(feat, 1.0055, 0x7a98c8, 0.65);
-
+    const borders = buildBorderLines(feat, 1.010, 0x90b0e0, 0.85);
     meshes.push({ mesh, borders });
+
+    // Rendre la main au navigateur régulièrement pour garder l'UI fluide
+    if (i % 8 === 7) await new Promise(r => setTimeout(r, 0));
   }
 
   regionsCache[countryName] = meshes;
@@ -607,8 +623,19 @@ async function enterRegionMode(countryMesh) {
   // Sortir de l'ancien mode régions si actif
   exitRegionMode();
 
+  setModeBadge(`Chargement des régions de ${name}…`);
+
   const regions = await getRegionsForCountry(name);
-  if (!regions.length) return; // pas de données région → on reste en mode pays
+  if (!regions.length) {
+    setModeBadge("Vue mondiale — pays");
+    return; // pas de données région → on reste en mode pays
+  }
+
+  // Si l'utilisateur a déjà cliqué ailleurs entre-temps, abandonner
+  if (selectedMesh !== countryMesh) {
+    setModeBadge("Vue mondiale — pays");
+    return;
+  }
 
   zoomedCountry = name;
   countryMesh.visible = false;
@@ -719,6 +746,7 @@ function setupControls() {
   };
   document.getElementById("btn-back")?.addEventListener("click", () => {
     exitRegionMode();
+    if (selectedMesh) { resetMeshColor(selectedMesh); selectedMesh = null; }
     animateZoomTo(2.5);
   });
 
@@ -797,11 +825,68 @@ function selectFeature(mesh) {
     ? (mesh.userData.country + " · Région")
     : "Pays";
 
-  // Clic sur un pays → zoom automatique + tentative de passage en mode régions
+  // Clic sur un pays → recentrer + zoom + tentative de passage en mode régions
   if (mesh.userData.type === "country") {
+    centerOnFeature(mesh.userData.feature);
     animateZoomTo(ZOOM_REGION_THRESHOLD - 0.15);
     enterRegionMode(mesh);
   }
+}
+
+/** Calcule le centroïde (lon/lat) d'une feature GeoJSON */
+function featureCentroid(feature) {
+  let sx = 0, sy = 0, n = 0;
+  const acc = ring => {
+    for (const [lon, lat] of ring) { sx += lon; sy += lat; n++; }
+  };
+  const geo = feature.geometry;
+  if (geo.type === "Polygon") acc(geo.coordinates[0]);
+  if (geo.type === "MultiPolygon") {
+    // Prendre le plus grand anneau (évite que les DOM-TOM tirent le centre au large)
+    let best = null, bestLen = -1;
+    for (const poly of geo.coordinates) {
+      if (poly[0].length > bestLen) { bestLen = poly[0].length; best = poly[0]; }
+    }
+    if (best) acc(best);
+  }
+  if (!n) return null;
+  return [sx / n, sy / n];
+}
+
+/** Anime la rotation du globe pour amener un point lon/lat face à la caméra */
+function centerOnFeature(feature) {
+  const c = featureCentroid(feature);
+  if (!c) return;
+  const [lon, lat] = c;
+
+  // La caméra regarde l'axe +Z. Pour amener (lon,lat) vers +Z, on résout les
+  // rotations inverses appliquées par globeGroup. ll2v place le point ; on veut
+  // que ce point, après rotation, pointe vers (0,0,+r).
+  const targetRotX = lat * Math.PI / 180;
+  const targetRotY = -(lon + 90) * Math.PI / 180;
+
+  // Normaliser targetRotY proche de rotY pour éviter un tour complet
+  let ty = targetRotY;
+  while (ty - rotY >  Math.PI) ty -= 2 * Math.PI;
+  while (ty - rotY < -Math.PI) ty += 2 * Math.PI;
+
+  animateRotateTo(clamp(targetRotX, -Math.PI/2, Math.PI/2), ty);
+}
+
+/** Anime rotX/rotY vers des cibles (ease-out) */
+function animateRotateTo(tx, ty) {
+  const sx = rotX, sy = rotY;
+  const duration = 600;
+  const t0 = performance.now();
+  velX = velY = 0;
+  function step(now) {
+    const t = Math.min(1, (now - t0) / duration);
+    const e = 1 - Math.pow(1 - t, 3);
+    rotX = sx + (tx - sx) * e;
+    rotY = sy + (ty - sy) * e;
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
 }
 
 /** Anime le zoom de la caméra vers une valeur cible */
@@ -828,7 +913,11 @@ function animate() {
   if (!isDragging) {
     velX *= 0.92; velY *= 0.92;
     rotX += velX; rotY += velY;
-    if (Math.abs(velX) < 0.0001 && Math.abs(velY) < 0.0001) rotY += 0.0006;
+    // Rotation automatique seulement si rien n'est sélectionné — sinon le pays
+    // choisi dériverait hors de l'écran pendant qu'on le regarde.
+    if (!selectedMesh && Math.abs(velX) < 0.0001 && Math.abs(velY) < 0.0001) {
+      rotY += 0.0006;
+    }
   }
   rotX = clamp(rotX, -Math.PI/2, Math.PI/2);
   globeGroup.rotation.x = rotX;
