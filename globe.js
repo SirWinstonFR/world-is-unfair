@@ -389,14 +389,67 @@ function triangulateRing(ring, r) {
   let indices;
   try { indices = earcut(flat); } catch(e) { return []; }
 
+  // ── Filtre anti-artefacts ──
+  // earcut produit occasionnellement, sur des polygones très concaves/complexes
+  // (ex: France métropolitaine avec ses 500+ sommets), une poignée de triangles
+  // "parasites" qui ne correspondent à aucune portion réelle du territoire — leur
+  // centroïde tombe hors du polygone alors que leurs 3 sommets sont bien sur le
+  // contour. On rejette ces triangles avec un test point-in-polygon rigoureux
+  // (ray casting) sur le centroïde de chaque triangle, plutôt qu'une heuristique
+  // de distance qui s'avère trop approximative selon la forme du pays.
   const verts = [];
   for (let i=0;i<indices.length;i+=3){
     const a=pts[indices[i]], b=pts[indices[i+1]], c=pts[indices[i+2]];
     if (!a||!b||!c) continue;
-    const va=ll2v(a[0],a[1],r), vb=ll2v(b[0],b[1],r), vc=ll2v(c[0],c[1],r);
-    verts.push(va.x,va.y,va.z, vb.x,vb.y,vb.z, vc.x,vc.y,vc.z);
+
+    const tcx = (a[0]+b[0]+c[0])/3, tcy = (a[1]+b[1]+c[1])/3;
+    if (!pointInPolygon(tcx, tcy, pts)) continue; // triangle parasite, on l'ignore
+
+    // Subdiviser le triangle en lon/lat AVANT projection, pour qu'il épouse la
+    // courbure de la sphère. Sans ça, un grand triangle plat relie ses 3 sommets
+    // par des cordes qui passent SOUS la surface (vers l'intérieur du globe) et
+    // disparaît derrière le renflement → trous noirs sur les grands pays.
+    subdivTriangle(a, b, c, r, verts, 0);
   }
   return verts;
+}
+
+/** Subdivise récursivement un triangle géographique jusqu'à ce que ses arêtes
+ *  soient assez courtes pour bien épouser la sphère, puis projette sur le globe. */
+function subdivTriangle(a, b, c, r, out, depth) {
+  const maxEdgeDeg = 3;   // seuil : arête max en degrés avant subdivision
+  const maxDepth   = 5;   // garde-fou récursion
+
+  const dab = Math.hypot(a[0]-b[0], a[1]-b[1]);
+  const dbc = Math.hypot(b[0]-c[0], b[1]-c[1]);
+  const dca = Math.hypot(c[0]-a[0], c[1]-a[1]);
+  const maxE = Math.max(dab, dbc, dca);
+
+  if (depth >= maxDepth || maxE <= maxEdgeDeg) {
+    const va=ll2v(a[0],a[1],r), vb=ll2v(b[0],b[1],r), vc=ll2v(c[0],c[1],r);
+    out.push(va.x,va.y,va.z, vb.x,vb.y,vb.z, vc.x,vc.y,vc.z);
+    return;
+  }
+
+  // Subdiviser sur l'arête la plus longue (split en 4 via les milieux d'arêtes)
+  const mab = [(a[0]+b[0])/2, (a[1]+b[1])/2];
+  const mbc = [(b[0]+c[0])/2, (b[1]+c[1])/2];
+  const mca = [(c[0]+a[0])/2, (c[1]+a[1])/2];
+  subdivTriangle(a, mab, mca, r, out, depth+1);
+  subdivTriangle(mab, b, mbc, r, out, depth+1);
+  subdivTriangle(mca, mbc, c, r, out, depth+1);
+  subdivTriangle(mab, mbc, mca, r, out, depth+1);
+}
+
+/** Test point-in-polygon par ray casting (algorithme standard, O(n)) */
+function pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
+    const xi=poly[i][0], yi=poly[i][1], xj=poly[j][0], yj=poly[j][1];
+    const intersect = ((yi>py) !== (yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 function buildFillMesh(feature, color, radius) {
